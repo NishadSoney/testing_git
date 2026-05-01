@@ -176,17 +176,29 @@ router.get('/', async (req, res) => {
     if (process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'YOUR_GEMINI_API_KEY_HERE') {
       try {
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-        const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+        const model = genAI.getGenerativeModel({ 
+          model: 'gemini-1.5-flash',
+          generationConfig: { responseMimeType: "application/json" }
+        });
         const prompt = `You are an expert Indian agricultural advisor. Given the current weather conditions for a farm in ${resolvedLocation}: Temperature: ${temp}°C, Humidity: ${humidity}%, Rainfall: ${rainfall}mm. Provide 1 to 2 very brief, urgent agricultural alerts or recommendations. Return ONLY a valid JSON array of objects, with each object having properties: "title" (short), "message" (1 sentence advice), "severity" ("High", "Moderate", or "Low"), and "type" (e.g. "Fungal Risk", "Heat Stress"). Do NOT use markdown code blocks like \`\`\`json, just return the raw JSON array.`;
         
-        const result = await model.generateContent(prompt);
+        // Enforce a strict 4-second timeout so the weather widget never hangs
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Gemini API timeout')), 4000)
+        );
+        
+        const result = await Promise.race([
+          model.generateContent(prompt),
+          timeoutPromise
+        ]);
+        
         const text = result.response.text().trim().replace(/```json/gi, '').replace(/```/g, '');
         alerts = JSON.parse(text);
         
         // Ensure format and add timeAgo
         alerts = alerts.map(a => ({ ...a, timeAgo: 'Just now' }));
       } catch (err) {
-        console.error('Gemini alert generation failed:', err);
+        console.error('Gemini alert generation failed (or timed out):', err.message);
       }
     }
 
